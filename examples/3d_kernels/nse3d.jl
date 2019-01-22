@@ -1627,7 +1627,7 @@ function lowstorageRK(::Val{dim}, ::Val{N}, mesh, vgeo, sgeo, Q, rhs, D,
         # Write VTK file
         if mod(step,iplot) == 0
             Q .= d_QL
-            convert_set3c_to_set2nc(Val(dim), Val(N), vgeo, Q)
+            # convert_set3c_to_set2nc(Val(dim), Val(N), vgeo, Q)
             X = ntuple(j->reshape((@view vgeo[:, _x+j-1, :]), ntuple(j->N+1,dim)..., nelem), dim)
             ρ = reshape((@view Q[:, _ρ, :]), ntuple(j->(N+1),dim)..., nelem)
             U = reshape((@view Q[:, _U, :]), ntuple(j->(N+1),dim)..., nelem)
@@ -1868,7 +1868,7 @@ function nse(::Val{dim}, ::Val{N}, mpicomm, ic, mesh, tend, iplot, visc;
     stats = zeros(DFloat, 2)
     mpirank == 0 && println("[CPU] computing initial energy...")
     Q_temp=copy(Q)
-    convert_set3c_to_set2nc(Val(dim), Val(N), vgeo, Q_temp)
+    # convert_set3c_to_set2nc(Val(dim), Val(N), vgeo, Q_temp)
     stats[1] = L2energysquared(Val(dim), Val(N), Q_temp, vgeo, mesh.realelems)
     @show (sqrt.(stats[1]))
 
@@ -1893,7 +1893,7 @@ function nse(::Val{dim}, ::Val{N}, mpicomm, ic, mesh, tend, iplot, visc;
 
     # Write VTK: final solution
     Q_temp=copy(Q)
-    convert_set3c_to_set2nc(Val(dim), Val(N), vgeo, Q_temp)
+    # convert_set3c_to_set2nc(Val(dim), Val(N), vgeo, Q_temp)
     X = ntuple(j->reshape((@view vgeo[:, _x+j-1, :]), ntuple(j->N+1,dim)...,
                           nelem), dim)
     ρ = reshape((@view Q_temp[:, _ρ, :]), ntuple(j->(N+1),dim)..., nelem)
