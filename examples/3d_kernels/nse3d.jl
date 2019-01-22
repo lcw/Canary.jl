@@ -1971,7 +1971,7 @@ function main()
     iplot=100
     Ne = 10
     N  = 4
-    visc = 1.0
+    visc = 0.0
     dim = 3
     hardware="cpu"
     @show (N,Ne,visc,iplot,time_final,hardware,mpisize)
