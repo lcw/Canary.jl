@@ -76,6 +76,9 @@
 include(joinpath(@__DIR__,"vtk.jl"))
 using MPI
 using Canary
+using Random
+using Logging
+using LinearAlgebra
 using Printf: @sprintf
 const HAVE_CUDA = try
     using CUDAnative
@@ -572,7 +575,7 @@ function volume_grad!(::Val{dim}, ::Val{N}, rhs::Array, Q, vgeo, D, elems) where
 end
 # }}}
 
-# Flux grad(Q)
+# {{{ Flux grad(Q)
 function flux_grad!(::Val{dim}, ::Val{N}, rhs::Array,  Q, sgeo, vgeo, elems, vmapM, vmapP, elemtobndy) where {dim, N}
     DFloat = eltype(Q)
     γ::DFloat       = _γ
@@ -786,7 +789,7 @@ function volume_div!(::Val{dim}, ::Val{N}, rhs::Array, gradQ, Q, vgeo, D, elems)
 end
 # }}}
 
-# Flux div(grad(Q))
+# {{{ Flux div(grad(Q))
 function flux_div!(::Val{dim}, ::Val{N}, rhs::Array,  gradQ, Q, sgeo, elems, vmapM, vmapP, elemtobndy) where {dim, N}
     DFloat = eltype(Q)
     γ::DFloat       = _γ
@@ -1564,7 +1567,12 @@ function lowstorageRK(::Val{dim}, ::Val{N}, mesh, vgeo, sgeo, Q, rhs, D,
 
     start_time = t1 = time_ns()
     for step = 1:nsteps
+      @info "RK step" step
         for s = 1:length(RKA)
+          @info "RK stage" s
+
+          @show norm(d_QL[:])
+          @show norm(d_rhsL[:])
 
             #---------------1st Order Operators--------------------------#
             # Send Data Q
@@ -1600,6 +1608,8 @@ function lowstorageRK(::Val{dim}, ::Val{N}, mesh, vgeo, sgeo, Q, rhs, D,
 
                 # volume div(grad Q) computation
                 volume_div!(Val(dim), Val(N), d_rhs_gradQC, d_gradQC, d_QC, d_vgeoC, d_D, mesh.realelems)
+
+                #@show norm(d_rhs_gradQC[:,:,:,:,1,:][:])
 
                 # Receive Data grad(Q)
                 receivedata_gradQ!(Val(dim), Val(N), mesh, recvreq, recvgradQ, d_recvgradQ, d_gradQL)
@@ -1852,7 +1862,7 @@ function nse(::Val{dim}, ::Val{N}, mpicomm, ic, mesh, tend, iplot, visc;
 
     # Convert to proper variables
     mpirank == 0 && println("[CPU] converting variables (CPU)...")
-    convert_set2nc_to_set3c(Val(dim), Val(N), vgeo, Q)
+    # convert_set2nc_to_set3c(Val(dim), Val(N), vgeo, Q)
 
     # Compute time step
     mpirank == 0 && println("[CPU] computing dt (CPU)...")
@@ -1936,9 +1946,12 @@ function main()
     @hascuda device!(mpirank % length(devices()))
 
     #Initial Conditions
+    rng = MersenneTwister(0)
+
     function ic(dim, x...)
         # FIXME: Type generic?
         DFloat = eltype(x)
+        #=
         γ::DFloat       = _γ
         p0::DFloat      = _p0
         R_gas::DFloat   = _R_gas
@@ -1964,14 +1977,22 @@ function main()
         V = 0.0
         W = 0.0
         E = θ_k
+        =#
+
+        ρ = 10.0 + rand(rng,DFloat)
+        U = 11.0 + rand(rng,DFloat)
+        V = 12.0 + rand(rng,DFloat)
+        W = 13.0 + rand(rng,DFloat)
+        E = 1e5 * rand(rng,DFloat) + 2e5
+
         ρ, U, V, W, E
     end
 
     time_final = DFloat(10.0)
     iplot=100
-    Ne = 10
-    N  = 4
-    visc = 0.0
+    Ne = 2
+    N  = 2
+    visc = 1.0
     dim = 3
     hardware="cpu"
     @show (N,Ne,visc,iplot,time_final,hardware,mpisize)
