@@ -76,6 +76,9 @@ include(joinpath(@__DIR__,"vtk.jl"))
 using MPI
 using Canary
 using Printf: @sprintf
+using Random
+using Logging
+using LinearAlgebra
 const HAVE_CUDA = try
     using CUDAnative
     using CUDAdrv
@@ -118,14 +121,22 @@ const _nsgeo = 4
 const _nx, _ny, _sMJ, _vMJI = 1:_nsgeo
 const sgeoid = (nx = _nx, ny = _ny, sMJ = _sMJ, vMJI = _vMJI)
 
-const _γ = 14  // 10
+const gas_constant = 8.3144598
+const molmass_dryair = 28.97e-3
+
 const _p0 = 100000
-const _R_gas = 28717 // 100
-const _c_p = 100467 // 100
-const _c_v = 7175 // 10
-const _gravity = 10
+# const _R_gas = 28717 // 100
+const _R_gas = gas_constant/molmass_dryair
+const _kappa_d = 2//7
+#const _c_p = 100467 // 100
+const _c_p = _R_gas/_kappa_d
+# const _c_v = 7175 // 10
+const _c_v = _c_p - _R_gas
+const _gravity = 9.81
 const _Prandtl = 71 // 10
 const _Stokes = -2 // 3
+# const _γ = 14  // 10
+const _γ = _c_p/_c_v
 # }}}
 
 # {{{ courant
@@ -463,7 +474,7 @@ function volume_grad!(::Val{dim}, ::Val{N}, rhs::Array, Q, vgeo, D, elems) where
 end
 # }}}
 
-# Flux grad(Q)
+# {{{ Flux grad(Q)
 function flux_grad!(::Val{dim}, ::Val{N}, rhs::Array,  Q, sgeo, vgeo, elems, vmapM, vmapP, elemtobndy) where {dim, N}
     DFloat = eltype(Q)
     γ::DFloat       = _γ
@@ -636,7 +647,7 @@ function volume_div!(::Val{dim}, ::Val{N}, rhs::Array, gradQ, Q, vgeo, D, elems)
 end
 # }}}
 
-# Flux div(grad(Q))
+# {{{ Flux div(grad(Q))
 function flux_div!(::Val{dim}, ::Val{N}, rhs::Array,  gradQ, Q, sgeo, elems, vmapM, vmapP, elemtobndy) where {dim, N}
     DFloat = eltype(Q)
     γ::DFloat       = _γ
@@ -804,13 +815,11 @@ end
 
 # {{{ Update solution (for all dimensions)
 function updatesolution!(::Val{dim}, ::Val{N}, rhs::Array,  rhs_gradQ, Q, vgeo, elems, rka, rkb, dt, visc) where {dim, N}
-
     @inbounds for e = elems, s = 1:_nstate, i = 1:(N+1)^dim
         rhs[i, s, e] += visc*rhs_gradQ[i,s,1,e]
         Q[i, s, e] += rkb * dt * rhs[i, s, e] * vgeo[i, _MJI, e]
         rhs[i, s, e] *= rka
     end
-
 end
 # }}}
 
@@ -1805,8 +1814,12 @@ function lowstorageRK(::Val{dim}, ::Val{N}, mesh, vgeo, sgeo, Q, rhs, D,
 
     start_time = t1 = time_ns()
     for step = 1:nsteps
+      @info "RK step" step
         for s = 1:length(RKA)
+          @info "RK stage" s
 
+          @show norm(d_QL[:])
+          @show norm(d_rhsL[:])
             #---------------1st Order Operators--------------------------#
             # Send Data Q
             senddata_Q(Val(dim), Val(N), mesh, sendreq, recvreq, sendQ,
@@ -1830,8 +1843,20 @@ function lowstorageRK(::Val{dim}, ::Val{N}, mesh, vgeo, sgeo, Q, rhs, D,
                 # flux grad Q computation
                 flux_grad!(Val(dim), Val(N), d_rhs_gradQL, d_QL, d_sgeo, d_vgeoL, mesh.realelems, d_vmapM, d_vmapP, d_elemtobndy)
 
+                # @show norm(d_rhs_gradQL[:,_ρ,1,:][:])
+                # @show norm(d_rhs_gradQL[:,_ρ,2,:][:])
+                # @show norm(d_rhs_gradQL[:,_U,1,:][:])
+                # @show norm(d_rhs_gradQL[:,_U,2,:][:])
+                # @show norm(d_rhs_gradQL[:,_V,1,:][:])
+                # @show norm(d_rhs_gradQL[:,_V,2,:][:])
+                # @show norm(d_rhs_gradQL[:,_E,1,:][:])
+                # @show norm(d_rhs_gradQL[:,_E,2,:][:])
+                # @show norm(d_rhs_gradQL[:])
+
                 # Construct grad Q
                 update_gradQ!(Val(dim), Val(N), d_gradQL, d_rhs_gradQL, d_vgeoL, mesh.realelems)
+
+                # @show norm(d_gradQL[:])
 
                 # Send Data grad(Q)
                 senddata_gradQ(Val(dim), Val(N), mesh, sendreq, recvreq, sendgradQ,
@@ -1846,6 +1871,18 @@ function lowstorageRK(::Val{dim}, ::Val{N}, mesh, vgeo, sgeo, Q, rhs, D,
 
                 # flux div(grad Q) computation
                 flux_div!(Val(dim), Val(N), d_rhs_gradQL, d_gradQL, d_QL, d_sgeo, mesh.realelems, d_vmapM, d_vmapP, d_elemtobndy)
+
+                # @show d_rhs_gradQL[:,_U,1,:][:]
+                # @show d_rhs_gradQL[:,_V,1,:][:]
+
+                # @show norm(d_rhs_gradQL[:,_ρ,1,:][:])
+                # @show norm(d_rhs_gradQL[:,_U,1,:][:])
+                # @show norm(d_rhs_gradQL[:,_V,1,:][:])
+                # @show norm(d_rhs_gradQL[:,_E,1,:][:])
+
+                # @show norm(d_rhs_gradQL[:,:,1,:][:])
+
+
             end
 
             #---------------Update Solution--------------------------#
@@ -1867,7 +1904,7 @@ function lowstorageRK(::Val{dim}, ::Val{N}, mesh, vgeo, sgeo, Q, rhs, D,
         # Write VTK file
         if mod(step,iplot) == 0
             Q .= d_QL
-            convert_set3c_to_set2nc(Val(dim), Val(N), vgeo, Q)
+            # convert_set3c_to_set2nc(Val(dim), Val(N), vgeo, Q)
             X = ntuple(j->reshape((@view vgeo[:, _x+j-1, :]), ntuple(j->N+1,dim)...,
                                   nelem), dim)
             ρ = reshape((@view Q[:, _ρ, :]), ntuple(j->(N+1),dim)..., nelem)
@@ -1911,7 +1948,6 @@ function convert_set2nc_to_set2c(::Val{dim}, ::Val{N}, vgeo, Q) where {dim, N}
         Q[n, _E, e] = ρ*E
     end
 end
-# }}}
 
 function convert_set2nc_to_set3c(::Val{dim}, ::Val{N}, vgeo, Q) where {dim, N}
     DFloat = eltype(Q)
@@ -1936,7 +1972,6 @@ function convert_set2nc_to_set3c(::Val{dim}, ::Val{N}, vgeo, Q) where {dim, N}
         Q[n, _E, e] = ρ*E
     end
 end
-# }}}
 
 function convert_set3c_to_set2nc(::Val{dim}, ::Val{N}, vgeo, Q) where {dim, N}
     DFloat = eltype(Q)
@@ -2014,7 +2049,7 @@ function nse(::Val{dim}, ::Val{N}, mpicomm, ic, mesh, tend, iplot, visc;
 
     # Convert to proper variables
     mpirank == 0 && println("[CPU] converting variables (CPU)...")
-    convert_set2nc_to_set3c(Val(dim), Val(N), vgeo, Q)
+    # convert_set2nc_to_set3c(Val(dim), Val(N), vgeo, Q)
 
     # Compute time step
     mpirank == 0 && println("[CPU] computing dt (CPU)...")
@@ -2031,7 +2066,7 @@ function nse(::Val{dim}, ::Val{N}, mpicomm, ic, mesh, tend, iplot, visc;
     stats = zeros(DFloat, 2)
     mpirank == 0 && println("[CPU] computing initial energy...")
     Q_temp=copy(Q)
-    convert_set3c_to_set2nc(Val(dim), Val(N), vgeo, Q_temp)
+    # convert_set3c_to_set2nc(Val(dim), Val(N), vgeo, Q_temp)
     stats[1] = L2energysquared(Val(dim), Val(N), Q_temp, vgeo, mesh.realelems)
 
     # plot the initial condition
@@ -2054,7 +2089,7 @@ function nse(::Val{dim}, ::Val{N}, mpicomm, ic, mesh, tend, iplot, visc;
 
     # plot the final solution
     Q_temp=copy(Q)
-    convert_set3c_to_set2nc(Val(dim), Val(N), vgeo, Q_temp)
+    # convert_set3c_to_set2nc(Val(dim), Val(N), vgeo, Q_temp)
     X = ntuple(j->reshape((@view vgeo[:, _x+j-1, :]), ntuple(j->N+1,dim)...,
                           nelem), dim)
     ρ = reshape((@view Q_temp[:, _ρ, :]), ntuple(j->(N+1),dim)..., nelem)
@@ -2096,9 +2131,12 @@ function main()
     @hascuda device!(mpirank % length(devices()))
 
     #Initial Conditions
+    rng = MersenneTwister(0)
+
     function ic(dim, x...)
         # FIXME: Type generic?
         DFloat = eltype(x)
+        #=
         γ::DFloat       = _γ
         p0::DFloat      = _p0
         R_gas::DFloat   = _R_gas
@@ -2123,15 +2161,21 @@ function main()
         U = u0
         V = 0.0
         E = θ_k
+        =#
+        ρ = 10.0 + rand(rng,DFloat)
+        U = 11.0 + rand(rng,DFloat)
+        V = 12.0 + rand(rng,DFloat)
+        E = 1e5 * rand(rng,DFloat) + 2e5
+
         ρ, U, V, E
     end
 
     #Input Parameters
     time_final = DFloat(10.0)
     iplot=100
-    Ne = 10
-    N  = 4
-    visc = 2.0
+    Ne = 2
+    N  = 2
+    visc = 1.0
     dim = 2
     hardware="cpu"
     if mpirank == 0

@@ -1870,8 +1870,10 @@ function nse(::Val{dim}, ::Val{N}, mpicomm, ic, mesh, tend, iplot, visc;
     #base_dt=0.02
     mpirank == 0 && @show (base_dt, Courant)
 
-    nsteps = ceil(Int64, tend / base_dt)
-    dt = tend / nsteps
+    # nsteps = ceil(Int64, tend / base_dt)
+    # dt = tend / nsteps
+    nsteps = 2
+    dt = base_dt
     mpirank == 0 && @show (dt, nsteps, dt * nsteps, tend)
 
     # Do time stepping
