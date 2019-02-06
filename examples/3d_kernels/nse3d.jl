@@ -1997,9 +1997,10 @@ function main()
     hardware="cpu"
     @show (N,Ne,visc,iplot,time_final,hardware,mpisize)
 
-    mesh3D = brickmesh((range(DFloat(0); length=Ne+1, stop=1000),
-                        range(DFloat(0); length=2, stop=1000),
-                        range(DFloat(0); length=Ne+1, stop=1000)),
+    bbox = (range(DFloat(0); length=Ne+1, stop=1000),
+            range(DFloat(0); length=2, stop=1000),
+            range(DFloat(0); length=Ne+1, stop=1000))
+    mesh3D = brickmesh(bbox,
                        (true, true, false),
                        part=mpirank+1, numparts=mpisize)
 
